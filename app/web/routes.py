@@ -54,7 +54,7 @@ def login_submit(
     settings = get_settings()
     expected_hash = settings.admin_password_hash.get_secret_value()
     if username == settings.admin_username and verify_password(password, expected_hash):
-        return login_response(username)
+        return login_response(username, request)
 
     record_login_attempt(client_ip)
     context = template_context(request) | {"error": "用户名或密码错误"}

@@ -92,9 +92,11 @@ def verify_csrf(request: Request, csrf_token: str = Form(...)) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid CSRF token")
 
 
-def login_response(username: str) -> RedirectResponse:
+def login_response(username: str, request: Request | None = None) -> RedirectResponse:
     cfg = _get_session_config()
-    secure = cfg.app_env != "development"
+    # Only set secure=True when actually served over HTTPS
+    is_https = request.url.scheme == "https" if request else False
+    secure = is_https and cfg.app_env != "development"
     response = RedirectResponse(url="/", status_code=303)
     response.set_cookie(SESSION_COOKIE, create_session_token(username), httponly=True, samesite="lax", secure=secure)
     response.set_cookie(CSRF_COOKIE, new_csrf_token(), httponly=False, samesite="lax", secure=secure)

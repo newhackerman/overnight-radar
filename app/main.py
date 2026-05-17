@@ -34,6 +34,9 @@ def configure_logging() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging()
+    # Auto-create tables if they don't exist
+    from app.db import Base, engine
+    Base.metadata.create_all(bind=engine)
     settings = get_settings()
     start_scheduler(settings.daily_job_time, settings.daily_push_time)
     yield
