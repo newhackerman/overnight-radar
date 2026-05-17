@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>任务日志</h1>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>任务名</th>
+        <th>运行日期</th>
+        <th>状态</th>
+        <th>开始时间</th>
+        <th>结束时间</th>
+        <th>耗时</th>
+        <th>错误</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for log in logs %}
+      <tr>
+        <td>{{ log.id }}</td>
+        <td>{{ log.job_name }}</td>
+        <td>{{ log.run_date or '' }}</td>
+        <td>{% if log.status == 'success' %}<span class="positive">{{ log.status }}</span>{% elif log.status == 'failed' %}<span class="negative">{{ log.status }}</span>{% else %}{{ log.status or '' }}{% endif %}</td>
+        <td>{% if log.started_at %}{{ log.started_at.strftime('%m-%d %H:%M:%S') }}{% endif %}</td>
+        <td>{% if log.finished_at %}{{ log.finished_at.strftime('%m-%d %H:%M:%S') }}{% endif %}</td>
+        <td class="num">{% if log.started_at and log.finished_at %}{{ '%.1f'|format((log.finished_at - log.started_at).total_seconds()) }}s{% endif %}</td>
+        <td>{{ log.error_message or '' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="empty">暂无任务日志</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

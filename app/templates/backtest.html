@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>历史回测</h1>
+
+<form method="post" action="/backtest/run" class="inline-form" style="margin-bottom:16px;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>事件日期 <input name="event_date" type="date" required value="{{ event_date or '' }}"></label>
+  <button type="submit">运行回测</button>
+</form>
+
+{% if available_dates %}
+<p class="muted" style="margin-top:-8px;">可用日期：{% for d in available_dates %}<a href="#" class="backtest-date" data-date="{{ d }}">{{ d }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</p>
+{% endif %}
+
+{% if results %}
+<!-- 汇总统计 -->
+{% if stats %}
+<div class="backtest-summary">
+  <span><strong>{{ results|length }}</strong> 条映射</span>
+  <span>胜率 <strong class="{% if stats.win_rate >= 50 %}positive{% else %}negative{% endif %}">{{ '%.1f'|format(stats.win_rate) }}%</strong></span>
+  <span>平均收益 <strong class="{% if stats.avg_return >= 0 %}positive{% else %}negative{% endif %}">{{ '%+.2f'|format(stats.avg_return) }}%</strong></span>
+  <span>方向准确率 <strong class="{% if stats.direction_accuracy >= 50 %}positive{% else %}negative{% endif %}">{{ '%.1f'|format(stats.direction_accuracy) }}%</strong></span>
+</div>
+{% endif %}
+
+<div class="table-wrap">
+  <table id="backtestTable">
+    <thead>
+      <tr>
+        <th class="sortable" data-col="0">美股代码</th>
+        <th class="sortable" data-col="1">A股代码</th>
+        <th class="sortable" data-col="2">A股名称</th>
+        <th class="sortable" data-col="3">方向</th>
+        <th class="sortable" data-col="4" data-type="number">强度</th>
+        <th class="sortable" data-col="5" data-type="number">T日</th>
+        <th class="sortable" data-col="6" data-type="number">T+1</th>
+        <th class="sortable" data-col="7" data-type="number">T+3</th>
+        <th class="sortable" data-col="8" data-type="number">T+5</th>
+        <th class="sortable" data-col="9" data-type="number">T+10</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in results %}
+      <tr>
+        <td>{{ r.us_symbol }}</td>
+        <td>{{ r.cn_symbol }}</td>
+        <td>{{ r.cn_name }}</td>
+        <td class="{% if r.impact_direction in ('利空', '偏空') %}negative{% elif r.impact_direction in ('利多', '偏多') %}positive{% endif %}">{{ r.impact_direction }}</td>
+        <td class="stars" data-sort-value="{{ r.impact_strength or 0 }}">{{ stars(r.impact_strength) }}</td>
+        <td class="num {% if r.t_return is not none %}{% if r.t_return|float > 0 %}positive{% elif r.t_return|float < 0 %}negative{% endif %}{% endif %}" data-sort-value="{{ r.t_return if r.t_return is not none else '' }}">{% if r.t_return is not none %}{{ '%+.2f'|format(r.t_return|float) }}%{% else %}-{% endif %}</td>
+        <td class="num {% if r.t1_return is not none %}{% if r.t1_return|float > 0 %}positive{% elif r.t1_return|float < 0 %}negative{% endif %}{% endif %}" data-sort-value="{{ r.t1_return if r.t1_return is not none else '' }}">{% if r.t1_return is not none %}{{ '%+.2f'|format(r.t1_return|float) }}%{% else %}-{% endif %}</td>
+        <td class="num {% if r.t3_return is not none %}{% if r.t3_return|float > 0 %}positive{% elif r.t3_return|float < 0 %}negative{% endif %}{% endif %}" data-sort-value="{{ r.t3_return if r.t3_return is not none else '' }}">{% if r.t3_return is not none %}{{ '%+.2f'|format(r.t3_return|float) }}%{% else %}-{% endif %}</td>
+        <td class="num {% if r.t5_return is not none %}{% if r.t5_return|float > 0 %}positive{% elif r.t5_return|float < 0 %}negative{% endif %}{% endif %}" data-sort-value="{{ r.t5_return if r.t5_return is not none else '' }}">{% if r.t5_return is not none %}{{ '%+.2f'|format(r.t5_return|float) }}%{% else %}-{% endif %}</td>
+        <td class="num {% if r.t10_return is not none %}{% if r.t10_return|float > 0 %}positive{% elif r.t10_return|float < 0 %}negative{% endif %}{% endif %}" data-sort-value="{{ r.t10_return if r.t10_return is not none else '' }}">{% if r.t10_return is not none %}{{ '%+.2f'|format(r.t10_return|float) }}%{% else %}-{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% elif event_date %}
+<p class="muted">未找到 {{ event_date }} 的映射数据，无法运行回测。请选择上方可用日期。</p>
+{% else %}
+<p class="muted">选择一个历史日期，查看映射 A 股在事件后的实际表现。</p>
+{% endif %}
+
+<script>
+// 点击可用日期快速填入
+document.querySelectorAll('.backtest-date').forEach(function(a) {
+  a.addEventListener('click', function(e) {
+    e.preventDefault();
+    document.querySelector('input[name="event_date"]').value = this.dataset.date;
+  });
+});
+
+// 表格排序
+(function() {
+  const table = document.getElementById('backtestTable');
+  if (!table) return;
+  const thead = table.querySelector('thead');
+  const tbody = table.querySelector('tbody');
+  let sortCol = -1, sortAsc = true;
+
+  thead.addEventListener('click', function(e) {
+    const th = e.target.closest('th.sortable');
+    if (!th) return;
+    const col = parseInt(th.dataset.col);
+    const isNum = th.dataset.type === 'number';
+
+    if (sortCol === col) { sortAsc = !sortAsc; } else { sortCol = col; sortAsc = true; }
+
+    thead.querySelectorAll('th.sortable').forEach(function(h) { h.classList.remove('sort-asc', 'sort-desc'); });
+    th.classList.add(sortAsc ? 'sort-asc' : 'sort-desc');
+
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    rows.sort(function(a, b) {
+      const cellA = a.cells[col], cellB = b.cells[col];
+      if (!cellA || !cellB) return 0;
+      let va, vb;
+      if (isNum) {
+        const svA = cellA.getAttribute('data-sort-value');
+        const svB = cellB.getAttribute('data-sort-value');
+        va = svA !== null && svA !== '' ? parseFloat(svA) : -9999;
+        vb = svB !== null && svB !== '' ? parseFloat(svB) : -9999;
+      } else {
+        va = cellA.textContent.trim().toLowerCase();
+        vb = cellB.textContent.trim().toLowerCase();
+      }
+      if (va < vb) return sortAsc ? -1 : 1;
+      if (va > vb) return sortAsc ? 1 : -1;
+      return 0;
+    });
+    rows.forEach(function(row) { tbody.appendChild(row); });
+  });
+})();
+</script>
+{% endblock %}

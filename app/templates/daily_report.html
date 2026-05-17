@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-title">
+  <h1>隔夜美股影响 A 股早报</h1>
+  <form method="post" action="/reports/open" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="date" name="report_date" value="{{ report_date }}" required>
+    <button type="submit">查看日期</button>
+  </form>
+  <form method="post" action="/reports/run" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="date" name="report_date" value="{{ report_date }}" required>
+    <label><input type="checkbox" name="push" value="true"> 推送</label>
+    <button type="submit">生成报告</button>
+  </form>
+</section>
+
+{% if report_date %}
+<p class="muted">报告日期：{{ report_date }}</p>
+<form method="post" action="/reports/{{ report_date }}/push" class="inline-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button type="submit">推送企业微信</button>
+</form>
+{% endif %}
+
+<div class="table-wrap">
+  <table id="reportTable">
+    <thead>
+      <tr>
+        <th class="sortable" data-col="0">美股代码</th>
+        <th class="sortable num" data-col="1" data-type="number">成交额排名</th>
+        <th class="sortable num" data-col="2" data-type="number">涨跌幅</th>
+        <th class="sortable" data-col="3">原因归类</th>
+        <th>事件摘要</th>
+        <th>映射A股</th>
+        <th class="sortable" data-col="6">影响方向</th>
+        <th class="sortable" data-col="7" data-type="number">影响强度</th>
+        <th>事件来源</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      <tr>
+        <td><strong>{{ item.us_symbol }}</strong></td>
+        <td class="num" data-sort-value="{{ item.turnover_rank }}">{{ item.turnover_rank }}</td>
+        <td class="num {% if item.pct_change is not none %}{% if item.pct_change|float > 0 %}positive{% elif item.pct_change|float < 0 %}negative{% endif %}{% endif %}" data-sort-value="{{ item.pct_change|float if item.pct_change is not none else -9999 }}">{% if item.pct_change is not none %}{{ '%.2f'|format(item.pct_change|float) }}%{% endif %}</td>
+        <td>{{ item.reason_category or '' }}</td>
+        <td>{{ item.event_summary or '' }}</td>
+        <td>{{ item.mapped_cn_targets or '' }}</td>
+        <td class="{% if item.impact_direction in ('利空', '偏空') %}negative{% elif item.impact_direction in ('利多', '偏多') %}positive{% endif %}"><strong>{{ item.impact_direction or '' }}</strong></td>
+        <td class="stars" data-sort-value="{{ item.impact_strength or 0 }}">{{ stars(item.impact_strength) }}</td>
+        <td>
+          {% if item.source_type == 'url' and item.event_source %}
+            <a href="{{ item.event_source }}" target="_blank" rel="noopener noreferrer">来源</a>
+          {% else %}
+            AI分析
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="9" class="empty">暂无报告数据</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+(function() {
+  const table = document.getElementById('reportTable');
+  if (!table) return;
+  const thead = table.querySelector('thead');
+  const tbody = table.querySelector('tbody');
+  let sortCol = -1, sortAsc = true;
+
+  thead.addEventListener('click', function(e) {
+    const th = e.target.closest('th.sortable');
+    if (!th) return;
+    const col = parseInt(th.dataset.col);
+    const isNum = th.dataset.type === 'number';
+
+    if (sortCol === col) { sortAsc = !sortAsc; } else { sortCol = col; sortAsc = true; }
+
+    thead.querySelectorAll('th.sortable').forEach(function(h) { h.classList.remove('sort-asc', 'sort-desc'); });
+    th.classList.add(sortAsc ? 'sort-asc' : 'sort-desc');
+
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    rows.sort(function(a, b) {
+      const cellA = a.cells[col], cellB = b.cells[col];
+      if (!cellA || !cellB) return 0;
+      let va, vb;
+      if (isNum) {
+        const svA = cellA.getAttribute('data-sort-value');
+        const svB = cellB.getAttribute('data-sort-value');
+        va = svA !== null ? parseFloat(svA) : -9999;
+        vb = svB !== null ? parseFloat(svB) : -9999;
+      } else {
+        va = cellA.textContent.trim().toLowerCase();
+        vb = cellB.textContent.trim().toLowerCase();
+      }
+      if (va < vb) return sortAsc ? -1 : 1;
+      if (va > vb) return sortAsc ? 1 : -1;
+      return 0;
+    });
+    rows.forEach(function(row) { tbody.appendChild(row); });
+  });
+})();
+</script>
+{% endblock %}

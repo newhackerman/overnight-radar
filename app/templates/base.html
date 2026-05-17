@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title or 'Overnight Radar' }}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="/" class="brand">Overnight Radar</a>
+    <nav>
+      <a href="/">每日早报</a>
+      <a href="/backtest">历史回测</a>
+      <a href="/mappings">映射管理</a>
+      <a href="/jobs">任务日志</a>
+      {% if current_user %}
+      <form method="post" action="/logout" class="nav-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="link-button">退出</button>
+      </form>
+      {% endif %}
+    </nav>
+  </header>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

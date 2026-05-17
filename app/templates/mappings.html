@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>映射管理</h1>
+
+<!-- 搜索/筛选栏 -->
+<form method="get" action="/mappings" class="filter-bar" id="filterForm">
+  <input name="us_symbol" value="{{ filters.us_symbol }}" placeholder="美股代码">
+  <input name="cn_symbol" value="{{ filters.cn_symbol }}" placeholder="A股代码">
+  <input name="theme" value="{{ filters.theme }}" placeholder="主题">
+  <input name="report_date_start" type="date" value="{{ filters.report_date_start }}" placeholder="开始日期">
+  <input name="report_date_end" type="date" value="{{ filters.report_date_end }}" placeholder="结束日期">
+  <button type="submit">搜索</button>
+  <a href="/mappings" class="btn-muted">重置</a>
+</form>
+
+<!-- 新增按钮 -->
+<button class="btn-add" onclick="openModal('add')">+ 新增映射</button>
+
+<!-- 数据表格 -->
+<div class="table-wrap">
+  <table id="mappingTable">
+    <thead>
+      <tr>
+        <th class="sortable" data-col="0">日期</th>
+        <th class="sortable" data-col="1">美股代码</th>
+        <th class="sortable" data-col="2">A股代码</th>
+        <th class="sortable" data-col="3">A股名称</th>
+        <th class="sortable" data-col="4">主题</th>
+        <th class="sortable" data-col="5">关系</th>
+        <th class="sortable" data-col="6">方向</th>
+        <th class="sortable" data-col="7" data-type="number">强度</th>
+        <th class="sortable" data-col="8" data-type="number">置信度</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in mappings %}
+      <tr>
+        <td>{{ item.report_date }}</td>
+        <td>{{ item.us_symbol }}</td>
+        <td>{{ item.cn_symbol or '' }}</td>
+        <td>{{ item.cn_name or '' }}</td>
+        <td>{{ item.theme or '' }}</td>
+        <td>{{ item.relation_type or '' }}</td>
+        <td>{{ item.impact_direction or '' }}</td>
+        <td class="stars" data-sort-value="{{ item.impact_strength or 0 }}">{{ stars(item.impact_strength) }}</td>
+        <td>{% if item.confidence is not none %}{{ '%.2f'|format(item.confidence|float) }}{% endif %}</td>
+        <td class="actions">
+          <button class="btn-edit" onclick='openModal("edit", {{ item.id }}, JSON.parse(this.dataset.row))' data-row='{{ {
+            "report_date": item.report_date|string,
+            "us_symbol": item.us_symbol,
+            "cn_symbol": item.cn_symbol or "",
+            "cn_name": item.cn_name or "",
+            "theme": item.theme or "",
+            "relation_type": item.relation_type or "",
+            "impact_direction": item.impact_direction or "",
+            "impact_strength": item.impact_strength or 0,
+            "confidence": "%.2f"|format(item.confidence|float) if item.confidence is not none else "0",
+          } | tojson }}'>编辑</button>
+          <form method="post" action="/mappings/{{ item.id }}/delete" class="inline-form"
+                onsubmit="return confirm('确认删除此映射？')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit" class="btn-delete">删除</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="10" class="empty">暂无映射数据</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- 新增/编辑模态框 -->
+<div id="mappingModal" class="modal-overlay" style="display:none">
+  <div class="modal-card">
+    <div class="modal-header">
+      <h2 id="modalTitle">新增映射</h2>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <form id="mappingForm" method="post" class="stack-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>日期 <input name="report_date" type="date" required></label>
+      <label>美股代码 <input name="us_symbol" required></label>
+      <label>A股代码 <input name="cn_symbol"></label>
+      <label>A股名称 <input name="cn_name"></label>
+      <label>主题 <input name="theme"></label>
+      <label>关系 <input name="relation_type"></label>
+      <label>方向 <input name="impact_direction"></label>
+      <label>强度 <input name="impact_strength" type="number" min="0" max="5" value="0"></label>
+      <label>置信度 <input name="confidence" type="number" step="0.01" min="0" max="1" value="0"></label>
+      <div class="modal-footer">
+        <button type="submit">保存</button>
+        <button type="button" class="btn-muted" onclick="closeModal()">取消</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+function openModal(mode, id, data) {
+  const modal = document.getElementById('mappingModal');
+  const form = document.getElementById('mappingForm');
+  const title = document.getElementById('modalTitle');
+
+  if (mode === 'add') {
+    title.textContent = '新增映射';
+    form.action = '/mappings/create';
+    form.reset();
+  } else {
+    title.textContent = '编辑映射';
+    form.action = '/mappings/' + id + '/edit';
+    for (const [key, val] of Object.entries(data)) {
+      const field = form.elements[key];
+      if (field) field.value = val;
+    }
+  }
+  modal.style.display = 'flex';
+}
+
+function closeModal() {
+  document.getElementById('mappingModal').style.display = 'none';
+}
+
+// 点击遮罩关闭
+document.getElementById('mappingModal').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
+});
+
+// 搜索表单提交前清空空的日期字段，避免FastAPI解析空字符串报错
+document.getElementById('filterForm').addEventListener('formdata', function(e) {
+  const fd = e.formData;
+  for (const key of ['report_date_start', 'report_date_end']) {
+    if (fd.get(key) === '') fd.delete(key);
+  }
+});
+
+// 表格排序 + 分页
+(function() {
+  const table = document.getElementById('mappingTable');
+  const thead = table.querySelector('thead');
+  const tbody = table.querySelector('tbody');
+  const PAGE_SIZE = 50;
+  let allRows = Array.from(tbody.querySelectorAll('tr'));
+  let currentPage = 1;
+  let sortCol = -1, sortAsc = true;
+
+  function getCellValue(row, col, isNum) {
+    const cell = row.cells[col];
+    if (!cell) return isNum ? 0 : '';
+    // Prefer data-sort-value for numeric columns (e.g. stars)
+    if (isNum) {
+      const sv = cell.getAttribute('data-sort-value');
+      if (sv !== null) return parseFloat(sv) || 0;
+      return parseFloat(cell.textContent.trim()) || 0;
+    }
+    return cell.textContent.trim().toLowerCase();
+  }
+
+  function renderPage() {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    const pageRows = allRows.slice(start, start + PAGE_SIZE);
+    tbody.innerHTML = '';
+    if (pageRows.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="10" class="empty">暂无映射数据</td></tr>';
+    } else {
+      pageRows.forEach(function(row) { tbody.appendChild(row); });
+    }
+    renderPager();
+  }
+
+  function renderPager() {
+    let pager = document.getElementById('tablePager');
+    if (!pager) {
+      pager = document.createElement('div');
+      pager.id = 'tablePager';
+      pager.className = 'pager';
+      table.parentNode.after(pager);
+    }
+    const totalPages = Math.ceil(allRows.length / PAGE_SIZE);
+    if (totalPages <= 1) { pager.innerHTML = ''; return; }
+    let html = '';
+    html += '<button class="pager-btn" data-page="prev"' + (currentPage <= 1 ? ' disabled' : '') + '>&laquo; 上一页</button>';
+    html += '<span class="pager-info">第 ' + currentPage + ' / ' + totalPages + ' 页（共 ' + allRows.length + ' 条）</span>';
+    html += '<button class="pager-btn" data-page="next"' + (currentPage >= totalPages ? ' disabled' : '') + '>下一页 &raquo;</button>';
+    pager.innerHTML = html;
+  }
+
+  // Pager click delegation
+  document.addEventListener('click', function(e) {
+    const btn = e.target.closest('.pager-btn');
+    if (!btn || btn.disabled) return;
+    const totalPages = Math.ceil(allRows.length / PAGE_SIZE);
+    if (btn.dataset.page === 'prev' && currentPage > 1) currentPage--;
+    else if (btn.dataset.page === 'next' && currentPage < totalPages) currentPage++;
+    renderPage();
+  });
+
+  // Sort
+  thead.addEventListener('click', function(e) {
+    const th = e.target.closest('th.sortable');
+    if (!th) return;
+    const col = parseInt(th.dataset.col);
+    const isNum = th.dataset.type === 'number';
+
+    if (sortCol === col) {
+      sortAsc = !sortAsc;
+    } else {
+      sortCol = col;
+      sortAsc = true;
+    }
+
+    thead.querySelectorAll('th.sortable').forEach(function(h) {
+      h.classList.remove('sort-asc', 'sort-desc');
+    });
+    th.classList.add(sortAsc ? 'sort-asc' : 'sort-desc');
+
+    allRows.sort(function(a, b) {
+      const va = getCellValue(a, col, isNum);
+      const vb = getCellValue(b, col, isNum);
+      if (va < vb) return sortAsc ? -1 : 1;
+      if (va > vb) return sortAsc ? 1 : -1;
+      return 0;
+    });
+    currentPage = 1;
+    renderPage();
+  });
+
+  // Initial render
+  renderPage();
+})();
+</script>
+{% endblock %}
