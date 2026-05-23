@@ -47,14 +47,18 @@ class AnalysisService:
             return self._fallback_item(report_date, item)
 
         target_names = "/".join(target.name for target in validated.mapped_cn_targets)
-        # Find existing row to update (avoid IntegrityError on unique key)
-        existing = self.db.scalar(
-            select(ReportImpactItem).where(
-                ReportImpactItem.report_date == validated.report_date,
-                ReportImpactItem.us_symbol == validated.us_symbol,
-            )
-        )
-        row = ReportImpactItem(
+        return self._upsert_item(validated, target_names)
+
+    def _upsert_item(self, validated, target_names: str) -> ReportImpactItem:
+        """Upsert a validated analysis item into report_impact_item.
+
+        Uses INSERT ... ON DUPLICATE KEY UPDATE (via MySQL dialect) to handle
+        concurrent duplicate (report_date, us_symbol) rows safely.
+        """
+        from sqlalchemy.dialects.mysql import insert as mysql_insert
+
+        targets_json = [t.model_dump() for t in validated.mapped_cn_targets]
+        stmt = mysql_insert(ReportImpactItem).values(
             report_date=validated.report_date,
             us_trade_date=validated.us_trade_date,
             us_symbol=validated.us_symbol,
@@ -65,7 +69,7 @@ class AnalysisService:
             reason_category=validated.reason_category,
             event_summary=validated.event_summary,
             mapped_cn_targets=target_names,
-            mapped_cn_symbols=[target.model_dump() for target in validated.mapped_cn_targets],
+            mapped_cn_symbols=targets_json,
             impact_direction=validated.impact_direction,
             impact_strength=validated.impact_strength,
             impact_score=validated.impact_score,
@@ -75,9 +79,19 @@ class AnalysisService:
             ai_model=validated.ai_model,
             raw_output=validated.raw_output,
         )
-        if existing:
-            row.id = existing.id
-        self.db.merge(row)
+        update_dict = {c.name: stmt.inserted[c.name] for c in ReportImpactItem.__table__.c
+                       if c.name not in ("id", "report_date", "us_symbol", "created_at")}
+        upsert_stmt = stmt.on_duplicate_key_update(**update_dict)
+        self.db.execute(upsert_stmt)
+        self.db.flush()
+
+        # Fetch the row (inserted or updated) for the caller
+        row = self.db.scalar(
+            select(ReportImpactItem).where(
+                ReportImpactItem.report_date == validated.report_date,
+                ReportImpactItem.us_symbol == validated.us_symbol,
+            )
+        )
 
         # Sync mapping targets to us_cn_mapping_history for backtest use
         self._save_mapping_history(validated)
@@ -117,16 +131,12 @@ class AnalysisService:
                 ))
 
     def _fallback_item(self, report_date: date, item: TopTurnoverItem) -> ReportImpactItem:
+        from sqlalchemy.dialects.mysql import insert as mysql_insert
+
         pct_change = item.pct_change or 0
         direction = "利多" if pct_change > 0 else "利空" if pct_change < 0 else "中性"
         strength = 3 if abs(pct_change) >= 3 else 2
-        existing = self.db.scalar(
-            select(ReportImpactItem).where(
-                ReportImpactItem.report_date == report_date,
-                ReportImpactItem.us_symbol == item.symbol,
-            )
-        )
-        row = ReportImpactItem(
+        stmt = mysql_insert(ReportImpactItem).values(
             report_date=report_date,
             us_trade_date=item.trade_date,
             us_symbol=item.symbol,
@@ -147,7 +157,16 @@ class AnalysisService:
             ai_model=self.ai_client.settings.ai_model,
             raw_output={},
         )
-        if existing:
-            row.id = existing.id
-        self.db.merge(row)
+        update_dict = {c.name: stmt.inserted[c.name] for c in ReportImpactItem.__table__.c
+                       if c.name not in ("id", "report_date", "us_symbol", "created_at")}
+        upsert_stmt = stmt.on_duplicate_key_update(**update_dict)
+        self.db.execute(upsert_stmt)
+        self.db.flush()
+
+        row = self.db.scalar(
+            select(ReportImpactItem).where(
+                ReportImpactItem.report_date == report_date,
+                ReportImpactItem.us_symbol == item.symbol,
+            )
+        )
         return row

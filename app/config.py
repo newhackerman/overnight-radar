@@ -65,7 +65,7 @@ class Settings(BaseSettings):
 
     # Backtest
     max_backtest_days: int = 3650
-    backtest_history_days: int = 30  # Days of CN history to fetch for multi-day returns
+    backtest_history_days: int = 60  # Days of CN history to fetch for multi-day returns (calendar days, need ~10+ trading days after event)
 
     # Session
     session_max_age_seconds: int = 86400 * 7  # 7 days

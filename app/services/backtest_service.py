@@ -100,7 +100,8 @@ class BacktestService:
         """Return cached backtest results if they exist and are sufficiently complete.
 
         Returns None if cache is missing or incomplete (needs refresh).
-        Complete means: T+10 data is filled OR event is too recent (< 15 calendar days).
+        Complete means: T+10 data is filled OR event is too recent (< 3 calendar days).
+        For intermediate dates, check individual period completeness based on elapsed days.
         """
         cached_rows = list(self.db.scalars(
             select(BacktestResult).where(BacktestResult.event_date == event_date)
@@ -109,13 +110,28 @@ class BacktestService:
         if not cached_rows:
             return None
 
-        # If event is old enough that T+10 should be available, check completeness
         days_since = (date.today() - event_date).days
+
+        # Rough mapping: calendar days needed to have enough trading days for each period
+        # (weekends + potential holidays considered)
+        PERIOD_MIN_DAYS = {
+            "t1_return": 3,
+            "t3_return": 7,
+            "t5_return": 12,
+            "t10_return": 18,
+        }
+
         if days_since > 15:
-            # All rows should have t10_return filled
+            # All periods should be filled
             complete = all(r.t10_return is not None for r in cached_rows)
             if not complete:
                 return None  # Need refresh to fill missing periods
+        elif days_since >= 3:
+            # Check each period: if enough time has passed but data is missing, refresh
+            for field, min_days in PERIOD_MIN_DAYS.items():
+                if days_since >= min_days:
+                    if any(getattr(r, field) is None for r in cached_rows):
+                        return None
 
         # Build result dicts from cached data, joining with mapping info
         mapping_lookup = {}
