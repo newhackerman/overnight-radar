@@ -15,14 +15,40 @@ class AnalysisService:
         self.db = db
         self.ai_client = ai_client or AIClient()
 
+    MAX_RETRIES = 3
+
+    @staticmethod
+    def _is_lock_timeout(exc: Exception) -> bool:
+        """Check if the exception is a MySQL lock wait timeout (1205)."""
+        msg = str(exc)
+        return "1205" in msg or "Lock wait timeout" in msg
+
     def analyze_top_items(self, report_date: date, items: list[TopTurnoverItem]) -> list[ReportImpactItem]:
         saved_items: list[ReportImpactItem] = []
         for item in items:
-            saved = self.analyze_one(report_date, item)
+            saved = self._analyze_one_with_retry(report_date, item)
             if saved:
                 saved_items.append(saved)
-        self.db.commit()
+            # Commit after each item to release row locks promptly.
+            # Without this, row locks from INSERT … ON DUPLICATE KEY UPDATE
+            # are held until the *entire* batch of 50 items finishes, and
+            # concurrent runs (scheduler + manual trigger) will deadlock.
+            self.db.commit()
         return saved_items
+
+    def _analyze_one_with_retry(self, report_date: date, item: TopTurnoverItem, attempt: int = 1) -> ReportImpactItem | None:
+        try:
+            return self.analyze_one(report_date, item)
+        except Exception as exc:
+            if self._is_lock_timeout(exc) and attempt < self.MAX_RETRIES:
+                import time
+                wait = 2 ** attempt  # exponential backoff: 2s, 4s
+                logger.warning("Lock wait timeout on %s (attempt %d/%d), retrying in %ds…",
+                               item.symbol, attempt, self.MAX_RETRIES, wait)
+                self.db.rollback()
+                time.sleep(wait)
+                return self._analyze_one_with_retry(report_date, item, attempt + 1)
+            raise
 
     def analyze_one(self, report_date: date, item: TopTurnoverItem) -> ReportImpactItem | None:
         payload = {
